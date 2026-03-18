@@ -1,0 +1,148 @@
+name: 🚀 RDP FULL SPEED - NO LAG
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: '🕐 Thời gian sử dụng'
+        required: false
+        default: '5h40m'
+        type: choice
+        options:
+        - '1h'
+        - '3h'
+        - '5h40m'
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 340
+
+    steps:
+      # 1. Optimasi sistem maksimal
+      - name: ⚡ Optimasi Sistem (High Performance)
+        run: |
+          # Power plan High Performance
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+
+          # Matikan Windows Defender sepenuhnya
+          Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisableBehaviorMonitoring $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisableBlockAtFirstSeen $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisableIOAVProtection $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisablePrivacyMode $true -ErrorAction SilentlyContinue
+          Stop-Service -Name WinDefend -Force -ErrorAction SilentlyContinue
+          Set-Service -Name WinDefend -StartupType Disabled -ErrorAction SilentlyContinue
+          Stop-Service -Name WdNisSvc -Force -ErrorAction SilentlyContinue
+          Set-Service -Name WdNisSvc -StartupType Disabled -ErrorAction SilentlyContinue
+          Stop-Service -Name Sense -Force -ErrorAction SilentlyContinue
+          Set-Service -Name Sense -StartupType Disabled -ErrorAction SilentlyContinue
+
+          # Matikan Windows Update & BITS
+          Stop-Service -Name wuauserv -Force -ErrorAction SilentlyContinue
+          Set-Service -Name wuauserv -StartupType Disabled -ErrorAction SilentlyContinue
+          Stop-Service -Name BITS -Force -ErrorAction SilentlyContinue
+          Set-Service -Name BITS -StartupType Disabled -ErrorAction SilentlyContinue
+
+          Write-Host "✅ Sistem dioptimasi, Defender nonaktif"
+
+      # 2. Setup RDP dan user
+      - name: 🔧 Setup RDP & User
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
+          $pass = -join ((65..90)+(97..122)+(48..57) | Get-Random -Count 12 | ForEach-Object {[char]$_})
+          $secPass = ConvertTo-SecureString $pass -AsPlainText -Force
+          New-LocalUser -Name "AISTV-PREMIUM" -Password $secPass -AccountNeverExpires
+          Add-LocalGroupMember -Group Administrators -Member "AISTV-PREMIUM"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "AISTV-PREMIUM"
+          $pass | Out-File $env:TEMP\rdp_password.txt
+          echo "RDP_PASS=$pass" >> $env:GITHUB_ENV
+          Write-Host "✅ User AISTV-PREMIUM siap"
+
+      # 3. Optimasi jaringan super cepat
+      - name: 🌐 Optimasi Jaringan (TCP/IP)
+        run: |
+          # Aktifkan fitur TCP modern
+          netsh int tcp set global autotuninglevel=normal
+          netsh int tcp set global rss=enabled
+          netsh int tcp set global chimney=enabled
+          netsh int tcp set global netdma=enabled
+
+          # Nonaktifkan Nagle's algorithm
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "TCPNoDelay" -Value 1
+
+          # Perbesar buffer TCP
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "TcpWindowSize" -Value 65535 -Type DWord -Force
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "GlobalMaxTcpWindowSize" -Value 65535 -Type DWord -Force
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "Tcp1323Opts" -Value 3 -Type DWord -Force
+
+          Write-Host "✅ Jaringan dioptimasi untuk kecepatan maksimal"
+
+      # 4. Install Tailscale dan dapatkan IP
+      - name: 🌐 Install & Connect Tailscale
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          if ($env:TAILSCALE_AUTH_KEY) {
+            Write-Host "📥 Menginstal Tailscale..."
+            $msi = "$env:TEMP\tailscale.msi"
+            Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile $msi
+            Start-Process msiexec -ArgumentList "/i", "`"$msi`"", "/quiet", "/norestart" -Wait
+            Remove-Item $msi -Force
+
+            Write-Host "⏳ Menunggu service Tailscale..."
+            Start-Sleep -Seconds 10
+
+            Write-Host "🔌 Menghubungkan ke Tailscale..."
+            & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=$env:TAILSCALE_AUTH_KEY --hostname=ai-stv-$env:GITHUB_RUN_ID
+
+            Write-Host "🔍 Mendapatkan IP Tailscale..."
+            $ip = $null
+            for ($i=0; $i -lt 10; $i++) {
+                $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4 2>$null
+                if ($ip) { break }
+                Start-Sleep -Seconds 2
+            }
+
+            if ($ip) {
+                echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+                Write-Host "✅ IP Tailscale: $ip"
+            } else {
+                Write-Host "⚠️ Gagal mendapatkan IP, gunakan localhost"
+                echo "TAILSCALE_IP=localhost" >> $env:GITHUB_ENV
+            }
+          } else {
+            Write-Host "⚠️ TAILSCALE_AUTH_KEY tidak ditemukan, gunakan localhost"
+            echo "TAILSCALE_IP=localhost" >> $env:GITHUB_ENV
+          }
+
+      # 5. Tampilkan info koneksi
+      - name: 🎉 Info Koneksi RDP
+        run: |
+          $pass = Get-Content $env:TEMP\rdp_password.txt
+          Write-Host ""
+          Write-Host "┌──────────────────────────────┐" -ForegroundColor Cyan
+          Write-Host "│   RDP SIAP - FULL SPEED     │" -ForegroundColor Cyan
+          Write-Host "├──────────────────────────────┤" -ForegroundColor Cyan
+          Write-Host "│ IP       : $env:TAILSCALE_IP " -ForegroundColor White
+          Write-Host "│ User     : AISTV-PREMIUM     " -ForegroundColor White
+          Write-Host "│ Password : $pass             " -ForegroundColor White
+          Write-Host "├──────────────────────────────┤" -ForegroundColor Cyan
+          Write-Host "│ Thời gian : ${{ github.event.inputs.duration }}          │" -ForegroundColor Yellow
+          Write-Host "│ Kết nối RDP sekarang!       │" -ForegroundColor Yellow
+          Write-Host "└──────────────────────────────┘" -ForegroundColor Cyan
+
+      # 6. Maintenance loop anti lag
+      - name: ⏳ Maintenance (Anti Lag)
+        run: |
+          $duration = "${{ github.event.inputs.duration }}"
+          if ($duration -eq "1h") { $totalMinutes = 60 }
+          elseif ($duration -eq "3h") { $totalMinutes = 180 }
+          else { $totalMinutes = 340 }
+          $end = (Get-Date).ToUniversalTime().AddMinutes($totalMinutes)
+          while ((Get-Date).ToUniversalTime() -lt $end) {
+            # Set prioritas proses penting jika diperlukan
+            # (tidak ada proses berat, hanya RDP)
+            Start-Sleep -Seconds 60
+          }
